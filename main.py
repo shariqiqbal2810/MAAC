@@ -48,7 +48,6 @@ def run(config):
     env = make_parallel_env(config.env_id, config.n_rollout_threads, run_num)
     model = AttentionSAC.init_from_env(env,
                                        tau=config.tau,
-                                       attend_tau=config.attend_tau,
                                        pi_lr=config.pi_lr,
                                        q_lr=config.q_lr,
                                        gamma=config.gamma,
@@ -143,8 +142,7 @@ if __name__ == '__main__':
     parser.add_argument("--attend_heads", default=4, type=int)
     parser.add_argument("--pi_lr", default=0.001, type=float)
     parser.add_argument("--q_lr", default=0.001, type=float)
-    parser.add_argument("--tau", default=0.04, type=float)
-    parser.add_argument("--attend_tau", default=0.002, type=float)
+    parser.add_argument("--tau", default=0.005, type=float)
     parser.add_argument("--gamma", default=0.99, type=float)
     parser.add_argument("--reward_scale", default=10., type=float)
     parser.add_argument("--use_gpu", action='store_true')

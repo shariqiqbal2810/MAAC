@@ -2,6 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
+from itertools import chain
 
 
 class AttentionCritic(nn.Module):
@@ -23,6 +24,7 @@ class AttentionCritic(nn.Module):
         super(AttentionCritic, self).__init__()
         assert (hidden_dim % attend_heads) == 0
         self.sa_sizes = sa_sizes
+        self.nagents = len(sa_sizes)
         self.attend_heads = attend_heads
 
         self.critic_encoders = nn.ModuleList()
@@ -67,16 +69,22 @@ class AttentionCritic(nn.Module):
                                                                 attend_dim),
                                                        nn.LeakyReLU()))
 
-    def q_parameters(self):
-        return self.parameters()
+        self.shared_modules = [self.key_extractors, self.selector_extractors,
+                               self.value_extractors, self.critic_encoders]
 
-    def nonattend_parameters(self):
-        return (p for n, p in self.named_parameters() if 'extractor' not in n
-                and 'critic_encoder' not in n)
+    def shared_parameters(self):
+        """
+        Parameters shared across agents and reward heads
+        """
+        return chain(*[m.parameters() for m in self.shared_modules])
 
-    def attend_parameters(self):
-        return (p for n, p in self.named_parameters() if 'extractor' in n
-                or 'critic_encoder' in n)
+    def scale_shared_grads(self):
+        """
+        Scale gradients for parameters that are shared since they accumulate
+        gradients from the critic loss function multiple times
+        """
+        for p in self.shared_parameters():
+            p.grad.data.mul_(1. / self.nagents)
 
     def forward(self, inps, agents=None, return_q=True, return_all_q=False,
                 regularize=False, return_attend=False, logger=None, niter=0):

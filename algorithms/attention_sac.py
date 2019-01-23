@@ -13,7 +13,7 @@ class AttentionSAC(object):
     task
     """
     def __init__(self, agent_init_params, sa_size,
-                 gamma=0.95, tau=0.01, attend_tau=0.002, pi_lr=0.01, q_lr=0.01,
+                 gamma=0.95, tau=0.01, pi_lr=0.01, q_lr=0.01,
                  reward_scale=10.,
                  pol_hidden_dim=128,
                  critic_hidden_dim=128, attend_heads=4,
@@ -45,12 +45,11 @@ class AttentionSAC(object):
         self.target_critic = AttentionCritic(sa_size, hidden_dim=critic_hidden_dim,
                                              attend_heads=attend_heads)
         hard_update(self.target_critic, self.critic)
-        self.critic_optimizer = Adam(self.critic.q_parameters(), lr=q_lr,
+        self.critic_optimizer = Adam(self.critic.parameters(), lr=q_lr,
                                      weight_decay=1e-3)
         self.agent_init_params = agent_init_params
         self.gamma = gamma
         self.tau = tau
-        self.attend_tau = attend_tau
         self.pi_lr = pi_lr
         self.q_lr = q_lr
         self.reward_scale = reward_scale
@@ -108,7 +107,8 @@ class AttentionSAC(object):
             for reg in regs:
                 q_loss += reg  # regularizing attention
         q_loss.backward()
-        sep_clip_grad_norm(self.critic.q_parameters(), 0.5)
+        self.critic.scale_shared_grads()
+        sep_clip_grad_norm(self.critic.parameters(), 0.5)
         self.critic_optimizer.step()
         self.critic_optimizer.zero_grad()
 
@@ -142,7 +142,6 @@ class AttentionSAC(object):
             curr_agent = self.agents[a_i]
             v = (all_q * probs).sum(dim=1, keepdim=True)
             pol_target = q - v
-            pol_target = (pol_target - pol_target.mean()) / pol_target.std()
             if soft:
                 pol_loss = (log_pi * (log_pi / self.reward_scale - pol_target).detach()).mean()
             else:
@@ -168,12 +167,7 @@ class AttentionSAC(object):
         Update all target networks (called after normal updates have been
         performed for each agent)
         """
-        for target_param, param in zip(self.target_critic.nonattend_parameters(),
-                                       self.critic.nonattend_parameters()):
-            target_param.data.copy_(target_param.data * (1.0 - self.tau) + param.data * self.tau)
-        for target_param, param in zip(self.target_critic.attend_parameters(),
-                                       self.critic.attend_parameters()):
-            target_param.data.copy_(target_param.data * (1.0 - self.attend_tau) + param.data * self.attend_tau)
+        soft_update(self.target_critic, self.critic, self.tau)
         for a in self.agents:
             soft_update(a.target_policy, a.policy, self.tau)
 
@@ -228,7 +222,7 @@ class AttentionSAC(object):
         torch.save(save_dict, filename)
 
     @classmethod
-    def init_from_env(cls, env, gamma=0.95, tau=0.01, attend_tau=0.002,
+    def init_from_env(cls, env, gamma=0.95, tau=0.01,
                       pi_lr=0.01, q_lr=0.01,
                       reward_scale=10.,
                       pol_hidden_dim=128, critic_hidden_dim=128, attend_heads=4,
@@ -250,7 +244,7 @@ class AttentionSAC(object):
                                       'num_out_pol': acsp.n})
             sa_size.append((obsp.shape[0], acsp.n))
 
-        init_dict = {'gamma': gamma, 'tau': tau, 'attend_tau': attend_tau,
+        init_dict = {'gamma': gamma, 'tau': tau,
                      'pi_lr': pi_lr, 'q_lr': q_lr,
                      'reward_scale': reward_scale,
                      'pol_hidden_dim': pol_hidden_dim,
