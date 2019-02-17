@@ -2,7 +2,7 @@
 Code for [*Actor-Attention-Critic for Multi-Agent Reinforcement Learning*](https://arxiv.org/abs/1810.02912) (Iqbal and Sha 2018)
 
 ## Requirements
-
+* Python 3.6.1 (Minimum)
 * [OpenAI baselines](https://github.com/openai/baselines), commit hash: 98257ef8c9bd23a24a330731ae54ed086d9ce4a7
 * My [fork](https://github.com/shariqiqbal2810/multiagent-particle-envs) of Multi-agent Particle Environments
 * [PyTorch](http://pytorch.org/), version: 0.3.0.post4
