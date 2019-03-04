@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 from torch.optim import Adam
-from utils.misc import soft_update, hard_update, enable_gradients, disable_gradients, sep_clip_grad_norm
+from utils.misc import soft_update, hard_update, enable_gradients, disable_gradients
 from utils.agents import AttentionAgent
 from utils.critics import AttentionCritic
 
@@ -108,12 +108,14 @@ class AttentionSAC(object):
                 q_loss += reg  # regularizing attention
         q_loss.backward()
         self.critic.scale_shared_grads()
-        sep_clip_grad_norm(self.critic.parameters(), 0.5)
+        grad_norm = torch.nn.utils.clip_grad_norm(
+            self.critic.parameters(), 10 * self.nagents)
         self.critic_optimizer.step()
         self.critic_optimizer.zero_grad()
 
         if logger is not None:
             logger.add_scalar('losses/q_loss', q_loss, self.niter)
+            logger.add_scalar('grad_norms/q', grad_norm, self.niter)
         self.niter += 1
 
     def update_policies(self, sample, soft=True, logger=None, **kwargs):
@@ -153,13 +155,16 @@ class AttentionSAC(object):
             pol_loss.backward()
             enable_gradients(self.critic)
 
-            sep_clip_grad_norm(curr_agent.policy.parameters(), 0.5)
+            grad_norm = torch.nn.utils.clip_grad_norm(
+                curr_agent.policy.parameters(), 0.5)
             curr_agent.policy_optimizer.step()
             curr_agent.policy_optimizer.zero_grad()
 
             if logger is not None:
                 logger.add_scalar('agent%i/losses/pol_loss' % a_i,
                                   pol_loss, self.niter)
+                logger.add_scalar('agent%i/grad_norms/pi' % a_i,
+                                  grad_norm, self.niter)
 
 
     def update_all_targets(self):

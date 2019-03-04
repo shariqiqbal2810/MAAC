@@ -82,21 +82,18 @@ def run(config):
             replay_buffer.push(obs, agent_actions, rewards, next_obs, dones)
             obs = next_obs
             t += config.n_rollout_threads
-            if (len(replay_buffer) >= max(config.pi_batch_size, config.q_batch_size) and
+            if (len(replay_buffer) >= config.batch_size and
                 (t % config.steps_per_update) < config.n_rollout_threads):
                 if config.use_gpu:
                     model.prep_training(device='gpu')
                 else:
                     model.prep_training(device='cpu')
-                for u_i in range(config.num_critic_updates):
-                    sample = replay_buffer.sample(config.q_batch_size,
+                for u_i in range(config.num_updates):
+                    sample = replay_buffer.sample(config.batch_size,
                                                   to_gpu=config.use_gpu)
                     model.update_critic(sample, logger=logger)
-                for u_i in range(config.num_pol_updates):
-                    sample = replay_buffer.sample(config.pi_batch_size,
-                                                  to_gpu=config.use_gpu)
                     model.update_policies(sample, logger=logger)
-                model.update_all_targets()
+                    model.update_all_targets()
                 model.prep_rollouts(device='cpu')
         ep_rews = replay_buffer.get_average_rewards(
             config.episode_length * config.n_rollout_threads)
@@ -126,25 +123,20 @@ if __name__ == '__main__':
     parser.add_argument("--n_episodes", default=50000, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
     parser.add_argument("--steps_per_update", default=100, type=int)
-    parser.add_argument("--num_critic_updates", default=4, type=int,
-                        help="Number of critic updates per update cycle")
-    parser.add_argument("--num_pol_updates", default=4, type=int,
-                        help="Number of policy updates per update cycle")
-    parser.add_argument("--pi_batch_size",
+    parser.add_argument("--num_updates", default=4, type=int,
+                        help="Number of updates per update cycle")
+    parser.add_argument("--batch_size",
                         default=1024, type=int,
-                        help="Batch size for policy training")
-    parser.add_argument("--q_batch_size",
-                        default=1024, type=int,
-                        help="Batch size for critic training")
+                        help="Batch size for training")
     parser.add_argument("--save_interval", default=1000, type=int)
     parser.add_argument("--pol_hidden_dim", default=128, type=int)
     parser.add_argument("--critic_hidden_dim", default=128, type=int)
     parser.add_argument("--attend_heads", default=4, type=int)
     parser.add_argument("--pi_lr", default=0.001, type=float)
     parser.add_argument("--q_lr", default=0.001, type=float)
-    parser.add_argument("--tau", default=0.005, type=float)
+    parser.add_argument("--tau", default=0.001, type=float)
     parser.add_argument("--gamma", default=0.99, type=float)
-    parser.add_argument("--reward_scale", default=10., type=float)
+    parser.add_argument("--reward_scale", default=100., type=float)
     parser.add_argument("--use_gpu", action='store_true')
 
     config = parser.parse_args()
