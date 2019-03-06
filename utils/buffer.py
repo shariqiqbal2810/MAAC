@@ -27,7 +27,7 @@ class ReplayBuffer(object):
             self.ac_buffs.append(np.zeros((max_steps, adim), dtype=np.float32))
             self.rew_buffs.append(np.zeros(max_steps, dtype=np.float32))
             self.next_obs_buffs.append(np.zeros((max_steps, odim), dtype=np.float32))
-            self.done_buffs.append(np.zeros(max_steps, dtype=np.bool))
+            self.done_buffs.append(np.zeros(max_steps, dtype=np.uint8))
 
 
         self.filled_i = 0  # index of first empty location in buffer (last index when full)
