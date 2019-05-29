@@ -18,3 +18,25 @@ All training code is contained within `main.py`. To view options simply run:
 ```
 python main.py --help
 ```
+
+## Citing our work
+
+If you use this repo in your work, please consider citing the corresponding paper:
+
+```
+@InProceedings{pmlr-v97-iqbal19a,
+  title =    {Actor-Attention-Critic for Multi-Agent Reinforcement Learning},
+  author =   {Iqbal, Shariq and Sha, Fei},
+  booktitle =    {Proceedings of the 36th International Conference on Machine Learning},
+  pages =    {2961--2970},
+  year =     {2019},
+  editor =   {Chaudhuri, Kamalika and Salakhutdinov, Ruslan},
+  volume =   {97},
+  series =   {Proceedings of Machine Learning Research},
+  address =      {Long Beach, California, USA},
+  month =    {09--15 Jun},
+  publisher =    {PMLR},
+  pdf =      {http://proceedings.mlr.press/v97/iqbal19a/iqbal19a.pdf},
+  url =      {http://proceedings.mlr.press/v97/iqbal19a.html},
+}
+```
