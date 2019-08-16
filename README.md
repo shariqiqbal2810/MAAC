@@ -18,6 +18,9 @@ All training code is contained within `main.py`. To view options simply run:
 ```
 python main.py --help
 ```
+The "Cooperative Treasure Collection" environment from our paper is referred to as `fullobs_collect_treasure` in this repo, and "Rover-Tower" is referred to as `multi_speaker_listener`.
+
+In order to match our experiments, the maximum episode length should be set to 100 for Cooperative Treasure Collection and 25 for Rover-Tower.
 
 ## Citing our work
 
