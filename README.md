@@ -15,7 +15,7 @@ The versions are just what I used and not necessarily strict requirements.
 
 All training code is contained within `main.py`. To view options simply run:
 
-```
+```shell
 python main.py --help
 ```
 The "Cooperative Treasure Collection" environment from our paper is referred to as `fullobs_collect_treasure` in this repo, and "Rover-Tower" is referred to as `multi_speaker_listener`.
@@ -26,7 +26,7 @@ In order to match our experiments, the maximum episode length should be set to 1
 
 If you use this repo in your work, please consider citing the corresponding paper:
 
-```
+```bibtex
 @InProceedings{pmlr-v97-iqbal19a,
   title =    {Actor-Attention-Critic for Multi-Agent Reinforcement Learning},
   author =   {Iqbal, Shariq and Sha, Fei},
