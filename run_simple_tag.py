@@ -11,7 +11,6 @@ from utils.buffer import ReplayBuffer
 from utils.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algorithms.attention_sac import AttentionSAC
 
-
 def make_parallel_env(env_id, n_rollout_threads, seed):
     def get_env_fn(rank):
         def init_env():
@@ -38,17 +37,28 @@ def run(config):
             run_num = 1
         else:
             run_num = max(exst_run_nums) + 1
+
     curr_run = 'run%i' % run_num
     run_dir = model_dir / curr_run
     log_dir = run_dir / 'logs'
     os.makedirs(log_dir)
     logger = SummaryWriter(str(log_dir))
 
+    '''
+    # add a Tensorboard graph comparing reward sum of predator vs. prey
+    layout = {
+        "Predator vs. Prey": {
+            "reward_sum": ["Multiline", ["loss/train", "loss/validation"]],
+        },
+    }
+    logger.add_custom_scalars(layout)
+    '''
+
     torch.manual_seed(run_num)
     np.random.seed(run_num)
 
     env = make_parallel_env(config.env_id, config.n_rollout_threads, run_num)
-    
+
     model = AttentionSAC.init_from_env(env,
                                        tau=config.tau,
                                        pi_lr=config.pi_lr,
@@ -58,15 +68,18 @@ def run(config):
                                        critic_hidden_dim=config.critic_hidden_dim,
                                        attend_heads=config.attend_heads,
                                        reward_scale=config.reward_scale)
+
     replay_buffer = ReplayBuffer(config.buffer_length, model.nagents,
                                  [obsp.shape[0] for obsp in env.observation_space],
                                  [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
                                   for acsp in env.action_space])
+
     t = 0
     for ep_i in range(0, config.n_episodes, config.n_rollout_threads):
         print("Episodes %i-%i of %i" % (ep_i + 1,
                                         ep_i + 1 + config.n_rollout_threads,
                                         config.n_episodes))
+
         obs = env.reset()
         model.prep_rollouts(device='cpu')
 
@@ -75,16 +88,20 @@ def run(config):
             torch_obs = [Variable(torch.Tensor(np.vstack(obs[:, i])),
                                   requires_grad=False)
                          for i in range(model.nagents)]
+
             # get actions as torch Variables
             torch_agent_actions = model.step(torch_obs, explore=True)
+
             # convert actions to numpy arrays
             agent_actions = [ac.data.numpy() for ac in torch_agent_actions]
+
             # rearrange actions to be per environment
             actions = [[ac[i] for ac in agent_actions] for i in range(config.n_rollout_threads)]
             next_obs, rewards, dones, infos = env.step(actions)
             replay_buffer.push(obs, agent_actions, rewards, next_obs, dones)
             obs = next_obs
             t += config.n_rollout_threads
+
             if (len(replay_buffer) >= config.batch_size and
                 (t % config.steps_per_update) < config.n_rollout_threads):
                 if config.use_gpu:
@@ -100,12 +117,34 @@ def run(config):
                 model.prep_rollouts(device='cpu')
         ep_rews = replay_buffer.get_average_rewards(
             config.episode_length * config.n_rollout_threads)
+
+        # sum up the rewards for each type of agent!
+        predator_reward_sum = 0
+        prey_reward_sum = 0
+        num_adversaries = 5
+
         for a_i, a_ep_rew in enumerate(ep_rews):
+            if a_i < num_adversaries:
+                predator_reward_sum += a_ep_rew * config.episode_length
+            else:
+                prey_reward_sum += a_ep_rew * config.episode_length
+
             logger.add_scalar('agent%i/mean_episode_rewards' % a_i,
                               a_ep_rew * config.episode_length, ep_i)
 
+        logger.add_scalar('predator_reward_sum', predator_reward_sum, ep_i)
+        logger.add_scalar('prey_reward_sum', prey_reward_sum, ep_i)
+        logger.add_scalar('total_reward_sum', prey_reward_sum + predator_reward_sum, ep_i)
+
+        # compare reward sum of predator vs. prey
+        logger.add_scalars(f'reward_sum', {
+            'predator': predator_reward_sum,
+            'prey': prey_reward_sum,
+        }, ep_i)
+
         if ep_i % config.save_interval < config.n_rollout_threads:
             model.prep_rollouts(device='cpu')
+
             os.makedirs(run_dir / 'incremental', exist_ok=True)
             model.save(run_dir / 'incremental' / ('model_ep%i.pt' % (ep_i + 1)))
             model.save(run_dir / 'model.pt')
@@ -115,14 +154,13 @@ def run(config):
     logger.export_scalars_to_json(str(log_dir / 'summary.json'))
     logger.close()
 
-
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("env_id", help="Name of environment")
     parser.add_argument("model_name",
                         help="Name of directory to store " +
                              "model/training contents")
-    parser.add_argument("--n_rollout_threads", default=12, type=int)
+    parser.add_argument("--env_id", help="Name of environment", default="simple_tag")
+    parser.add_argument("--n_rollout_threads", default=10, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
     parser.add_argument("--n_episodes", default=50000, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
