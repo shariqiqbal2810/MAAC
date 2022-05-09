@@ -19,7 +19,7 @@ class Scenario(BaseScenario):
         world.dim_c = 2
         num_agents = 15
         world.num_agents = num_agents
-        num_adversaries = 5
+        num_adversaries = 10
         num_landmarks = 3
 
         # add agents

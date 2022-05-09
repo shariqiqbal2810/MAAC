@@ -1,21 +1,29 @@
 # Experiments for applying MAAC on Multi Particle Environments (PettingZoo)
 
 ## How to Run (by Yuseung Lee)
-1. Run Simple Tag 
+#### 1. Run Simple Tag 
 * [Simple Tag (PettingZoo)](https://www.pettingzoo.ml/mpe/simple_tag)
 ```shell
 python run_simple_tag.py test_1
 ```
-* Experiment 1. Good=10, Adversary=5
-* Experiment 2. Good=5, Adversary=10
+* Experiment 1. Good=10, Adversary=5, Landmark=0
+* Experiment 2. Good=5, Adversary=10, Landmark=0
+##### Configurations
+* n_rollout_threads: 10
+* n_episodes: 50000
+* episode_length: 25
 
-2. Run Simple Adversary 
+#### 2. Run Simple Adversary 
 * [Simple Adversary (PettingZoo)](https://www.pettingzoo.ml/mpe/simple_adversary)
 ```shell
 python run_simple_adversary.py test_1
 ```
-* Experiment 1. Good=10, Adversary=5
-* Experiment 2. Good=5, Adversary=10
+* Experiment 1. Good=10, Adversary=5, Landmarks=3
+* Experiment 2. Good=5, Adversary=10, Landmarks=3
+##### Configurations
+* n_rollout_threads: 3
+* n_episodes: 10000
+* episode_length: 25
 
 
 # Multi-Actor-Attention-Critic
