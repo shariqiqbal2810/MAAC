@@ -1,10 +1,22 @@
 # Experiments for applying MAAC on Multi Particle Environments (PettingZoo)
 
-## How to Run
-1. Run Simple Tag environment
+## How to Run (by Yuseung Lee)
+1. Run Simple Tag 
+* [Simple Tag (PettingZoo)](https://www.pettingzoo.ml/mpe/simple_tag)
 ```shell
 python run_simple_tag.py test_1
 ```
+* Experiment 1. Good=10, Adversary=5
+* Experiment 2. Good=5, Adversary=10
+
+2. Run Simple Adversary 
+* [Simple Adversary (PettingZoo)](https://www.pettingzoo.ml/mpe/simple_adversary)
+```shell
+python run_simple_adversary.py test_1
+```
+* Experiment 1. Good=10, Adversary=5
+* Experiment 2. Good=5, Adversary=10
+
 
 # Multi-Actor-Attention-Critic
 Code for [*Actor-Attention-Critic for Multi-Agent Reinforcement Learning*](https://arxiv.org/abs/1810.02912) (Iqbal and Sha, ICML 2019)
