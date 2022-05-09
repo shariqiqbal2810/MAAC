@@ -109,27 +109,27 @@ def run(config):
             config.episode_length * config.n_rollout_threads)
 
         # sum up the rewards for each type of agent!
-        predator_reward_sum = 0
-        prey_reward_sum = 0
-        num_adversaries = 10
+        good_reward_sum = 0
+        adversary_reward_sum = 0
+        num_adversaries = 5
 
         for a_i, a_ep_rew in enumerate(ep_rews):
             if a_i < num_adversaries:
-                predator_reward_sum += a_ep_rew * config.episode_length
+                adversary_reward_sum += a_ep_rew * config.episode_length
             else:
-                prey_reward_sum += a_ep_rew * config.episode_length
+                good_reward_sum += a_ep_rew * config.episode_length
 
             logger.add_scalar('agent%i/mean_episode_rewards' % a_i,
                               a_ep_rew * config.episode_length, ep_i)
 
-        logger.add_scalar('predator_reward_sum', predator_reward_sum, ep_i)
-        logger.add_scalar('prey_reward_sum', prey_reward_sum, ep_i)
-        logger.add_scalar('total_reward_sum', prey_reward_sum + predator_reward_sum, ep_i)
+        logger.add_scalar('adversary_reward_sum', adversary_reward_sum, ep_i)
+        logger.add_scalar('good_reward_sum', good_reward_sum, ep_i)
+        logger.add_scalar('total_reward_sum', good_reward_sum + adversary_reward_sum, ep_i)
 
         # compare reward sum of predator vs. prey
         logger.add_scalars(f'reward_sum', {
-            'predator': predator_reward_sum,
-            'prey': prey_reward_sum,
+            'good': good_reward_sum,
+            'adversary': adversary_reward_sum,
         }, ep_i)
 
         if ep_i % config.save_interval < config.n_rollout_threads:
@@ -149,10 +149,10 @@ if __name__ == '__main__':
     parser.add_argument("model_name",
                         help="Name of directory to store " +
                              "model/training contents")
-    parser.add_argument("--env_id", help="Name of environment", default="simple_tag")
-    parser.add_argument("--n_rollout_threads", default=10, type=int)
+    parser.add_argument("--env_id", help="Name of environment", default="simple_adversary")
+    parser.add_argument("--n_rollout_threads", default=3, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
-    parser.add_argument("--n_episodes", default=50000, type=int)
+    parser.add_argument("--n_episodes", default=10000, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
     parser.add_argument("--steps_per_update", default=100, type=int)
     parser.add_argument("--num_updates", default=4, type=int,
@@ -174,3 +174,6 @@ if __name__ == '__main__':
     config = parser.parse_args()
 
     run(config)
+
+
+
