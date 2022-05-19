@@ -40,8 +40,8 @@ class AttentionSAC(object):
                                       hidden_dim=pol_hidden_dim,
                                       **params)
                          for params in agent_init_params]
-        self.critic = AttentionCritic(sa_size, hidden_dim=critic_hidden_dim,
-                                      attend_heads=attend_heads)
+        self.critic = AttentionCritic(sa_size, hidden_dim=critic_hidden_dim, attend_heads=attend_heads)
+        
         self.target_critic = AttentionCritic(sa_size, hidden_dim=critic_hidden_dim,
                                              attend_heads=attend_heads)
         hard_update(self.target_critic, self.critic)
@@ -86,18 +86,19 @@ class AttentionSAC(object):
         # Q loss
         next_acs = []
         next_log_pis = []
+
         for pi, ob in zip(self.target_policies, next_obs):
             curr_next_ac, curr_next_log_pi = pi(ob, return_log_pi=True)
             next_acs.append(curr_next_ac)
             next_log_pis.append(curr_next_log_pi)
+
         trgt_critic_in = list(zip(next_obs, next_acs))
         critic_in = list(zip(obs, acs))
         next_qs = self.target_critic(trgt_critic_in)
-        critic_rets = self.critic(critic_in, regularize=True,
-                                  logger=logger, niter=self.niter)
+        critic_rets = self.critic(critic_in, regularize=True, logger=logger, niter=self.niter)
         q_loss = 0
-        for a_i, nq, log_pi, (pq, regs) in zip(range(self.nagents), next_qs,
-                                               next_log_pis, critic_rets):
+
+        for a_i, nq, log_pi, (pq, regs) in zip(range(self.nagents), next_qs, next_log_pis, critic_rets):
             target_q = (rews[a_i].view(-1, 1) +
                         self.gamma * nq *
                         (1 - dones[a_i].view(-1, 1)))
@@ -106,6 +107,7 @@ class AttentionSAC(object):
             q_loss += MSELoss(pq, target_q.detach())
             for reg in regs:
                 q_loss += reg  # regularizing attention
+
         q_loss.backward()
         self.critic.scale_shared_grads()
         grad_norm = torch.nn.utils.clip_grad_norm(

@@ -111,7 +111,7 @@ def run(config):
         # sum up the rewards for each type of agent!
         predator_reward_sum = 0
         prey_reward_sum = 0
-        num_adversaries = 10
+        num_adversaries = 5
 
         for a_i, a_ep_rew in enumerate(ep_rews):
             if a_i < num_adversaries:
@@ -150,15 +150,18 @@ if __name__ == '__main__':
                         help="Name of directory to store " +
                              "model/training contents")
     parser.add_argument("--env_id", help="Name of environment", default="simple_tag")
-    parser.add_argument("--n_rollout_threads", default=10, type=int)
+    parser.add_argument("--n_rollout_threads", default=5, type=int)
     parser.add_argument("--buffer_length", default=int(1e6), type=int)
     parser.add_argument("--n_episodes", default=50000, type=int)
     parser.add_argument("--episode_length", default=25, type=int)
     parser.add_argument("--steps_per_update", default=100, type=int)
     parser.add_argument("--num_updates", default=4, type=int,
                         help="Number of updates per update cycle")
+    # parser.add_argument("--batch_size",
+    #                     default=1024, type=int,
+    #                     help="Batch size for training")
     parser.add_argument("--batch_size",
-                        default=1024, type=int,
+                        default=256, type=int,
                         help="Batch size for training")
     parser.add_argument("--save_interval", default=1000, type=int)
     parser.add_argument("--pol_hidden_dim", default=128, type=int)

@@ -3,7 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from itertools import chain
-
+from .critic_buffer import CriticBuffer
 
 class AttentionCritic(nn.Module):
     """
@@ -29,32 +29,32 @@ class AttentionCritic(nn.Module):
 
         self.critic_encoders = nn.ModuleList()
         self.critics = nn.ModuleList()
-
         self.state_encoders = nn.ModuleList()
+
+        '''add self.critic_buffer (yuseung, 05/20)'''
+        self.critic_buffer = CriticBuffer(attend_heads=attend_heads)
+
         # iterate over agents
         for sdim, adim in sa_sizes:
             idim = sdim + adim
             odim = adim
             encoder = nn.Sequential()
             if norm_in:
-                encoder.add_module('enc_bn', nn.BatchNorm1d(idim,
-                                                            affine=False))
+                encoder.add_module('enc_bn', nn.BatchNorm1d(idim, affine=False))
             encoder.add_module('enc_fc1', nn.Linear(idim, hidden_dim))
             encoder.add_module('enc_nl', nn.LeakyReLU())
             self.critic_encoders.append(encoder)
+
             critic = nn.Sequential()
-            critic.add_module('critic_fc1', nn.Linear(2 * hidden_dim,
-                                                      hidden_dim))
+            critic.add_module('critic_fc1', nn.Linear(2 * hidden_dim, hidden_dim))
             critic.add_module('critic_nl', nn.LeakyReLU())
             critic.add_module('critic_fc2', nn.Linear(hidden_dim, odim))
             self.critics.append(critic)
 
             state_encoder = nn.Sequential()
             if norm_in:
-                state_encoder.add_module('s_enc_bn', nn.BatchNorm1d(
-                                            sdim, affine=False))
-            state_encoder.add_module('s_enc_fc1', nn.Linear(sdim,
-                                                            hidden_dim))
+                state_encoder.add_module('s_enc_bn', nn.BatchNorm1d(sdim, affine=False))
+            state_encoder.add_module('s_enc_fc1', nn.Linear(sdim, hidden_dim))
             state_encoder.add_module('s_enc_nl', nn.LeakyReLU())
             self.state_encoders.append(state_encoder)
 
@@ -62,12 +62,11 @@ class AttentionCritic(nn.Module):
         self.key_extractors = nn.ModuleList()
         self.selector_extractors = nn.ModuleList()
         self.value_extractors = nn.ModuleList()
+
         for i in range(attend_heads):
             self.key_extractors.append(nn.Linear(hidden_dim, attend_dim, bias=False))
             self.selector_extractors.append(nn.Linear(hidden_dim, attend_dim, bias=False))
-            self.value_extractors.append(nn.Sequential(nn.Linear(hidden_dim,
-                                                                attend_dim),
-                                                       nn.LeakyReLU()))
+            self.value_extractors.append(nn.Sequential(nn.Linear(hidden_dim, attend_dim), nn.LeakyReLU()))
 
         self.shared_modules = [self.key_extractors, self.selector_extractors,
                                self.value_extractors, self.critic_encoders]
@@ -103,9 +102,11 @@ class AttentionCritic(nn.Module):
         """
         if agents is None:
             agents = range(len(self.critic_encoders))
+
         states = [s for s, a in inps]
         actions = [a for s, a in inps]
         inps = [torch.cat((s, a), dim=1) for s, a in inps]
+
         # extract state-action encoding for each agent
         sa_encodings = [encoder(inp) for encoder, inp in zip(self.critic_encoders, inps)]
         # extract state encoding for each agent that we're returning Q for
@@ -121,24 +122,39 @@ class AttentionCritic(nn.Module):
         other_all_values = [[] for _ in range(len(agents))]
         all_attend_logits = [[] for _ in range(len(agents))]
         all_attend_probs = [[] for _ in range(len(agents))]
+
         # calculate attention per head
-        for curr_head_keys, curr_head_values, curr_head_selectors in zip(
-                all_head_keys, all_head_values, all_head_selectors):
+        for i_head, curr_head_keys, curr_head_values, curr_head_selectors in zip(
+                range(len(all_head_keys)), all_head_keys, all_head_values, all_head_selectors):
+
             # iterate over agents
             for i, a_i, selector in zip(range(len(agents)), agents, curr_head_selectors):
                 keys = [k for j, k in enumerate(curr_head_keys) if j != a_i]
                 values = [v for j, v in enumerate(curr_head_values) if j != a_i]
+
+                '''TODO: implement a pipeline to consider N previous states for attention'''
+
                 # calculate attention across agents
                 attend_logits = torch.matmul(selector.view(selector.shape[0], 1, -1),
                                              torch.stack(keys).permute(1, 2, 0))
+
                 # scale dot-products by size of key (from Attention is All You Need)
                 scaled_attend_logits = attend_logits / np.sqrt(keys[0].shape[1])
+
+                '''add critic buffer (yuseung, 05/20)'''
+                # scaled_attend_logits = self.critic_buffer.update_attend_weights(i_head, scaled_attend_logits)
+                prev_attend = self.critic_buffer.get_prev_attend(i_head, scaled_attend_logits.detach())
+                if prev_attend is not None:
+                    scaled_attend_logits = 0.2 * prev_attend + 0.8 * scaled_attend_logits
+
                 attend_weights = F.softmax(scaled_attend_logits, dim=2)
+
                 other_values = (torch.stack(values).permute(1, 2, 0) *
                                 attend_weights).sum(dim=2)
                 other_all_values[i].append(other_values)
                 all_attend_logits[i].append(attend_logits)
                 all_attend_probs[i].append(attend_weights)
+
         # calculate Q per agent
         all_rets = []
         for i, a_i in enumerate(agents):
