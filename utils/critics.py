@@ -13,7 +13,8 @@ class AttentionCritic(nn.Module):
     observation and action, and can also attend over the other agents' encoded
     observations and actions.
     """
-    def __init__(self, sa_sizes, hidden_dim=32, norm_in=True, attend_heads=1):
+    def __init__(self, sa_sizes, n_clusters=5,
+                    hidden_dim=32, norm_in=True, attend_heads=1):
         """
         Inputs:
             sa_sizes (list of (int, int)): Size of state and action spaces per
@@ -33,13 +34,41 @@ class AttentionCritic(nn.Module):
         self.critics = nn.ModuleList()
         self.state_encoders = nn.ModuleList()
 
-        '''add self.critic_buffer (yuseung, 05/20)'''
+        # self.n_clusters = n_clusters                # number of clusters (fixed)
+        self.n_clusters = self.nagents // 5 
+        self.clst_encoders = nn.ModuleList()        # encoders for state-action of each cluster
+        self.clst_state_encoders = nn.ModuleList()  # encoders for states of each cluster
+        
         '''
-        self.critic_buffer = CriticBuffer(attend_heads=attend_heads)
+        iterate over clusters (05/23, yuseung)
+        each cluster has exactly 5 agents (assumption)
         '''
+        assert self.nagents % 5 == 0, 'nagents should be a multiple of 5'
+
+        for n in range(0, self.nagents, 5):
+            # sdim, adim of each agent in a cluster should be equal
+            sdim, adim = sa_sizes[n]
+            
+            idim = sdim + adim
+            odim = adim
+            clst_encoder = nn.Sequential()
+            if norm_in:
+                clst_encoder.add_module('c_enc_bn', nn.BatchNorm1d(idim, affine=False))
+            clst_encoder.add_module('c_enc_fc1', nn.Linear(idim, hidden_dim))
+            clst_encoder.add_module('c_enc_nl', nn.LeakyReLU())
+            self.clst_encoders.append(clst_encoder)
+
+            clst_state_encoder = nn.Sequential()
+            if norm_in:
+                clst_state_encoder.add_module('cs_enc_bn', nn.BatchNorm1d(sdim, affine=False))
+            clst_state_encoder.add_module('cs_enc_fc1', nn.Linear(sdim, hidden_dim))
+            clst_state_encoder.add_module('cs_enc_nl', nn.LeakyReLU())
+            self.clst_state_encoders.append(clst_state_encoder)
 
         # iterate over agents
         for sdim, adim in sa_sizes:
+            # print(f'sdim: {sdim}, adim: {adim}')
+
             idim = sdim + adim
             odim = adim
             encoder = nn.Sequential()
@@ -131,7 +160,10 @@ class AttentionCritic(nn.Module):
         ############################ EDIT HERE (05/23, yuseung) ############################
 
         '''TODO: step 2) cluster the agents based on position'''
-        cluster_list = cluster_agents(agents, positions)    # agents: list of agent indices, positions: current position of each agent
+        # cluster_list = cluster_agents(agents, positions)    # agents: list of agent indices, positions: current position of each agent
+        cluster_list = {}
+        for idx in range(self.n_clusters):
+            cluster_list[idx] = [i for i in range(idx * 5, idx * 5 + 5)]
 
         '''TODO: step 3) encode (states, actions) of each cluster'''
 
@@ -139,16 +171,35 @@ class AttentionCritic(nn.Module):
         clst_states = []
         clst_actions = []
 
-        for clst in cluster_list:
-            state_list = [inps[idx][0] for idx in cluster_list]
-            action_list = [inps[idx][1] for idx in cluster_list]
+        for clst_idx, clst_agents in cluster_list.items():
+            state_list = [states[idx] for idx in clst_agents]
+            action_list = [actions[idx] for idx in clst_agents]
 
-            clst_states.append(avg_states(state_list))
-            clst_actions.append(avg_actions(action_list))
+            # TODO: make the states, actions as one (HOW?)
+            # print(state_list[0].shape)
+            # print(action_list[0].shape)
+
+            # approach 1. mean (05/23, yuseung)
+            clst_state = torch.mean(state_list, dim=0)
+            clst_action = torch.mean(action_list, dim=0)
+
+            clst_states.append(clst_state)
+            clst_actions.append(clst_action)
 
         '''TODO: put the cluster (states, actions) into encoder'''
-        clst_encodings = [clst_encoder(s, a) for s, a in zip(clst_states, clst_actions)]
+        
+        clst_inps = [torch.cat((s, a), dim=1) for s, a in zip(clst_states, clst_actions)]
+        
+        # extract state-action encoding for each cluster
+        c_sa_encodings = [encoder(inp) for encoder, inp in zip(self.clst_state_encoders, clst_inps)]
+        # extract state encoding for each cluster
+        c_s_encodings = [self.clst_state_encoders[c_i](clst_states[c_i]) for c_i in range(self.n_clusters)]
+        
+        '''TODO: extract key, value, selector for clusters'''
 
+        '''TODO: calculate attention for clusters'''
+
+        '''TODO: add clsuter_attention & agent_attention'''
 
         ############################ EDIT HERE (05/23, yuseung) ############################
 
