@@ -27,6 +27,7 @@ def make_parallel_env(env_id, n_rollout_threads, seed):
 def run(config):
     model_dir = Path('./models') / config.env_id / config.model_name
     
+    '''
     if not model_dir.exists():
         run_num = 1
     else:
@@ -37,10 +38,12 @@ def run(config):
             run_num = 1
         else:
             run_num = max(exst_run_nums) + 1
+    '''
+    run_num = 1
 
     curr_run = 'run%i' % run_num
     run_dir = model_dir / curr_run
-    log_dir = run_dir / 'logs'
+    log_dir = run_dir / 'logs/2'
     os.makedirs(log_dir)
     logger = SummaryWriter(str(log_dir))
 

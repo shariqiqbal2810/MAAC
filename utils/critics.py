@@ -3,6 +3,8 @@ import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
 from itertools import chain
+
+from utils.clustering import cluster_agents
 from .critic_buffer import CriticBuffer
 
 class AttentionCritic(nn.Module):
@@ -32,7 +34,9 @@ class AttentionCritic(nn.Module):
         self.state_encoders = nn.ModuleList()
 
         '''add self.critic_buffer (yuseung, 05/20)'''
+        '''
         self.critic_buffer = CriticBuffer(attend_heads=attend_heads)
+        '''
 
         # iterate over agents
         for sdim, adim in sa_sizes:
@@ -89,23 +93,24 @@ class AttentionCritic(nn.Module):
                 regularize=False, return_attend=False, logger=None, niter=0):
         """
         Inputs:
-            inps (list of PyTorch Matrices): Inputs to each agents' encoder
-                                             (batch of obs + ac)
+            inps (list of PyTorch Matrices): Inputs to each agents' encoder (batch of obs + ac)
             agents (int): indices of agents to return Q for
             return_q (bool): return Q-value
             return_all_q (bool): return Q-value for all actions
             regularize (bool): returns values to add to loss function for
                                regularization
             return_attend (bool): return attention weights per agent
-            logger (TensorboardX SummaryWriter): If passed in, important values
-                                                 are logged
+            logger (TensorboardX SummaryWriter): If passed in, important values are logged
         """
         if agents is None:
             agents = range(len(self.critic_encoders))
 
+        # state, actions of each agent
         states = [s for s, a in inps]
         actions = [a for s, a in inps]
         inps = [torch.cat((s, a), dim=1) for s, a in inps]
+
+        '''step 1) encode (states, actions) of each agent'''
 
         # extract state-action encoding for each agent
         sa_encodings = [encoder(inp) for encoder, inp in zip(self.critic_encoders, inps)]
@@ -122,6 +127,30 @@ class AttentionCritic(nn.Module):
         other_all_values = [[] for _ in range(len(agents))]
         all_attend_logits = [[] for _ in range(len(agents))]
         all_attend_probs = [[] for _ in range(len(agents))]
+
+        ############################ EDIT HERE (05/23, yuseung) ############################
+
+        '''TODO: step 2) cluster the agents based on position'''
+        cluster_list = cluster_agents(agents, positions)    # agents: list of agent indices, positions: current position of each agent
+
+        '''TODO: step 3) encode (states, actions) of each cluster'''
+
+        '''TODO: concatenate the (states, actions) into a single dimension --> input to encoder'''
+        clst_states = []
+        clst_actions = []
+
+        for clst in cluster_list:
+            state_list = [inps[idx][0] for idx in cluster_list]
+            action_list = [inps[idx][1] for idx in cluster_list]
+
+            clst_states.append(avg_states(state_list))
+            clst_actions.append(avg_actions(action_list))
+
+        '''TODO: put the cluster (states, actions) into encoder'''
+        clst_encodings = [clst_encoder(s, a) for s, a in zip(clst_states, clst_actions)]
+
+
+        ############################ EDIT HERE (05/23, yuseung) ############################
 
         # calculate attention per head
         for i_head, curr_head_keys, curr_head_values, curr_head_selectors in zip(
@@ -142,7 +171,8 @@ class AttentionCritic(nn.Module):
                 scaled_attend_logits = attend_logits / np.sqrt(keys[0].shape[1])
 
                 '''add critic buffer (yuseung, 05/20)'''
-                # scaled_attend_logits = self.critic_buffer.update_attend_weights(i_head, scaled_attend_logits)
+                scaled_attend_logits = self.critic_buffer.update_attend_weights(i_head, scaled_attend_logits)
+
                 prev_attend = self.critic_buffer.get_prev_attend(i_head, scaled_attend_logits.detach())
                 if prev_attend is not None:
                     scaled_attend_logits = 0.2 * prev_attend + 0.8 * scaled_attend_logits
