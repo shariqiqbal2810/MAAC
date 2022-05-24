@@ -95,11 +95,21 @@ class AttentionCritic(nn.Module):
         self.key_extractors = nn.ModuleList()
         self.selector_extractors = nn.ModuleList()
         self.value_extractors = nn.ModuleList()
+        
+        # (5/24) Query, key, value extractors for clusters
+        self.c_key_extractors = nn.ModuleList()
+        self.c_selector_extractors = nn.ModuleList()
+        self.c_value_extractors = nn.ModuleList()
 
         for i in range(attend_heads):
             self.key_extractors.append(nn.Linear(hidden_dim, attend_dim, bias=False))
             self.selector_extractors.append(nn.Linear(hidden_dim, attend_dim, bias=False))
             self.value_extractors.append(nn.Sequential(nn.Linear(hidden_dim, attend_dim), nn.LeakyReLU()))
+
+            # (5/24) For clusters
+            self.c_key_extractors.append(nn.Linear(hidden_dim, attend_dim, bias=False))
+            self.c_selector_extractors.append(nn.Linear(hidden_dim, attend_dim, bias=False))
+            self.c_value_extractors.append(nn.Sequential(nn.Linear(hidden_dim, attend_dim), nn.LeakyReLU()))
 
         self.shared_modules = [self.key_extractors, self.selector_extractors,
                                self.value_extractors, self.critic_encoders]
@@ -117,6 +127,50 @@ class AttentionCritic(nn.Module):
         """
         for p in self.shared_parameters():
             p.grad.data.mul_(1. / self.nagents)
+
+    """
+    queryHeads : list of query values for each attention head (list of list of queries)
+    """
+    def calculateAttention(self, agents, queryHeads, keyHeads, valueHeads):
+        all_attention_values = [[] for _ in range(len(agents))]
+        all_attend_logits = [[] for _ in range(len(agents))]
+        all_attend_probs = [[] for _ in range(len(agents))]
+
+        # calculate attention per head
+        for i_head, curr_head_keys, curr_head_values, curr_head_selectors in zip(
+                range(len(keyHeads)), keyHeads, valueHeads, queryHeads):
+
+            # iterate over agents
+            for i, a_i, selector in zip(range(len(agents)), agents, curr_head_selectors):
+                keys = [k for j, k in enumerate(curr_head_keys) if j != a_i]
+                values = [v for j, v in enumerate(curr_head_values) if j != a_i]
+
+                '''TODO: implement a pipeline to consider N previous states for attention'''
+
+                # calculate attention across agents
+                attend_logits = torch.matmul(selector.view(selector.shape[0], 1, -1),
+                                                torch.stack(keys).permute(1, 2, 0))
+
+                # scale dot-products by size of key (from Attention is All You Need)
+                scaled_attend_logits = attend_logits / np.sqrt(keys[0].shape[1])
+
+                '''add critic buffer (yuseung, 05/20)'''
+                scaled_attend_logits = self.critic_buffer.update_attend_weights(i_head, scaled_attend_logits)
+
+                prev_attend = self.critic_buffer.get_prev_attend(i_head, scaled_attend_logits.detach())
+                if prev_attend is not None:
+                    scaled_attend_logits = 0.2 * prev_attend + 0.8 * scaled_attend_logits
+
+                attend_weights = F.softmax(scaled_attend_logits, dim=2)
+
+                attention_values = (torch.stack(values).permute(1, 2, 0) *
+                                attend_weights).sum(dim=2)
+
+                all_attention_values[i].append(attention_values)
+                all_attend_logits[i].append(attend_logits)
+                all_attend_probs[i].append(attend_weights)
+        
+        return all_attention_values, all_attend_logits, all_attend_probs
 
     def forward(self, inps, agents=None, return_q=True, return_all_q=False,
                 regularize=False, return_attend=False, logger=None, niter=0):
@@ -153,9 +207,6 @@ class AttentionCritic(nn.Module):
         all_head_selectors = [[sel_ext(enc) for i, enc in enumerate(s_encodings) if i in agents]
                               for sel_ext in self.selector_extractors]
 
-        other_all_values = [[] for _ in range(len(agents))]
-        all_attend_logits = [[] for _ in range(len(agents))]
-        all_attend_probs = [[] for _ in range(len(agents))]
 
         ############################ EDIT HERE (05/23, yuseung) ############################
 
@@ -196,45 +247,27 @@ class AttentionCritic(nn.Module):
         c_s_encodings = [self.clst_state_encoders[c_i](clst_states[c_i]) for c_i in range(self.n_clusters)]
         
         '''TODO: extract key, value, selector for clusters'''
+        clst_head_keys = [[k_ext(enc) for enc in c_sa_encodings] for k_ext in self.c_key_extractors]
+        clst_head_values = [[v_ext(enc) for enc in c_sa_encodings] for v_ext in self.c_value_extractors]
+        clst_head_selectors = [[sel_ext(enc) for i, enc in enumerate(c_s_encodings) if i in agents]
+                              for sel_ext in self.c_selector_extractors]
+
+        print("hello")
 
         '''TODO: calculate attention for clusters'''
+        all_attention_values, all_attend_logits, all_attend_probs = calculateAttention(agents, all_head_selectors, all_head_keys, all_head_values)
+        clst_attention_values, clst_attend_logits, clst_attend_probs = calculateAttention(agents, clst_head_selectors, clst_head_keys, clst_head_values)
 
         '''TODO: add clsuter_attention & agent_attention'''
+        """
+        (5/24) Attention probability is important than the value itself? How one cluster should pay attention to the other group..
+        ex) cluster A has high attention probability toward cluster B
+        -> amplify attention values of agents in A toward other agents in B, by multiplying certain factor 
+        """
+        # dimension?
 
         ############################ EDIT HERE (05/23, yuseung) ############################
 
-        # calculate attention per head
-        for i_head, curr_head_keys, curr_head_values, curr_head_selectors in zip(
-                range(len(all_head_keys)), all_head_keys, all_head_values, all_head_selectors):
-
-            # iterate over agents
-            for i, a_i, selector in zip(range(len(agents)), agents, curr_head_selectors):
-                keys = [k for j, k in enumerate(curr_head_keys) if j != a_i]
-                values = [v for j, v in enumerate(curr_head_values) if j != a_i]
-
-                '''TODO: implement a pipeline to consider N previous states for attention'''
-
-                # calculate attention across agents
-                attend_logits = torch.matmul(selector.view(selector.shape[0], 1, -1),
-                                             torch.stack(keys).permute(1, 2, 0))
-
-                # scale dot-products by size of key (from Attention is All You Need)
-                scaled_attend_logits = attend_logits / np.sqrt(keys[0].shape[1])
-
-                '''add critic buffer (yuseung, 05/20)'''
-                scaled_attend_logits = self.critic_buffer.update_attend_weights(i_head, scaled_attend_logits)
-
-                prev_attend = self.critic_buffer.get_prev_attend(i_head, scaled_attend_logits.detach())
-                if prev_attend is not None:
-                    scaled_attend_logits = 0.2 * prev_attend + 0.8 * scaled_attend_logits
-
-                attend_weights = F.softmax(scaled_attend_logits, dim=2)
-
-                other_values = (torch.stack(values).permute(1, 2, 0) *
-                                attend_weights).sum(dim=2)
-                other_all_values[i].append(other_values)
-                all_attend_logits[i].append(attend_logits)
-                all_attend_probs[i].append(attend_weights)
 
         # calculate Q per agent
         all_rets = []
