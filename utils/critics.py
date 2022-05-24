@@ -34,6 +34,9 @@ class AttentionCritic(nn.Module):
         self.critics = nn.ModuleList()
         self.state_encoders = nn.ModuleList()
 
+        '''add self.critic_buffer (yuseung, 05/20)'''
+        self.critic_buffer = CriticBuffer(attend_heads=attend_heads)
+
         # self.n_clusters = n_clusters                # number of clusters (fixed)
         self.n_clusters = self.nagents // 5 
         self.clst_encoders = nn.ModuleList()        # encoders for state-action of each cluster
@@ -155,8 +158,6 @@ class AttentionCritic(nn.Module):
                 scaled_attend_logits = attend_logits / np.sqrt(keys[0].shape[1])
 
                 '''add critic buffer (yuseung, 05/20)'''
-                scaled_attend_logits = self.critic_buffer.update_attend_weights(i_head, scaled_attend_logits)
-
                 prev_attend = self.critic_buffer.get_prev_attend(i_head, scaled_attend_logits.detach())
                 if prev_attend is not None:
                     scaled_attend_logits = 0.2 * prev_attend + 0.8 * scaled_attend_logits
@@ -223,8 +224,8 @@ class AttentionCritic(nn.Module):
         clst_actions = []
 
         for clst_idx, clst_agents in cluster_list.items():
-            state_list = [states[idx] for idx in clst_agents]
-            action_list = [actions[idx] for idx in clst_agents]
+            state_list = torch.stack([states[idx] for idx in clst_agents])
+            action_list = torch.stack([actions[idx] for idx in clst_agents])
 
             # TODO: make the states, actions as one (HOW?)
             # print(state_list[0].shape)
@@ -242,7 +243,7 @@ class AttentionCritic(nn.Module):
         clst_inps = [torch.cat((s, a), dim=1) for s, a in zip(clst_states, clst_actions)]
         
         # extract state-action encoding for each cluster
-        c_sa_encodings = [encoder(inp) for encoder, inp in zip(self.clst_state_encoders, clst_inps)]
+        c_sa_encodings = [encoder(inp) for encoder, inp in zip(self.clst_encoders, clst_inps)]
         # extract state encoding for each cluster
         c_s_encodings = [self.clst_state_encoders[c_i](clst_states[c_i]) for c_i in range(self.n_clusters)]
         
@@ -255,8 +256,8 @@ class AttentionCritic(nn.Module):
         print("hello")
 
         '''TODO: calculate attention for clusters'''
-        all_attention_values, all_attend_logits, all_attend_probs = calculateAttention(agents, all_head_selectors, all_head_keys, all_head_values)
-        clst_attention_values, clst_attend_logits, clst_attend_probs = calculateAttention(agents, clst_head_selectors, clst_head_keys, clst_head_values)
+        all_attention_values, all_attend_logits, all_attend_probs = self.calculateAttention(agents, all_head_selectors, all_head_keys, all_head_values)
+        clst_attention_values, clst_attend_logits, clst_attend_probs = self.calculateAttention(agents, clst_head_selectors, clst_head_keys, clst_head_values)
 
         '''TODO: add clsuter_attention & agent_attention'''
         """

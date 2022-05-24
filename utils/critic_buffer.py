@@ -9,7 +9,7 @@ class CriticBuffer():
 
     def get_prev_attend(self, i_head, new_attend):
         if self.prev_attend[i_head] is None:
-            self.prev_attend[i_head] = new_attend
+            self.prev_attend[i_head] = new_attend # Q. 차원 안 맞을텐데?
             return None
 
         prev_attend = self.prev_attend[i_head]
