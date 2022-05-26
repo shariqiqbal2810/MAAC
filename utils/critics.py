@@ -5,7 +5,8 @@ import numpy as np
 from itertools import chain
 
 from utils.clustering import cluster_agents
-from .critic_buffer import CriticBuffer
+# from .critic_buffer import CriticBuffer
+from .cluster_critics import ClusterCritic
 
 class AttentionCritic(nn.Module):
     """
@@ -35,43 +36,10 @@ class AttentionCritic(nn.Module):
         self.state_encoders = nn.ModuleList()
 
         '''add self.critic_buffer (yuseung, 05/20)'''
-        self.critic_buffer = CriticBuffer(attend_heads=attend_heads)
-
-        # self.n_clusters = n_clusters                # number of clusters (fixed)
-        self.n_clusters = self.nagents // 5 
-        self.clst_encoders = nn.ModuleList()        # encoders for state-action of each cluster
-        self.clst_state_encoders = nn.ModuleList()  # encoders for states of each cluster
-        
-        '''
-        iterate over clusters (05/23, yuseung)
-        each cluster has exactly 5 agents (assumption)
-        '''
-        assert self.nagents % 5 == 0, 'nagents should be a multiple of 5'
-
-        for n in range(0, self.nagents, 5):
-            # sdim, adim of each agent in a cluster should be equal
-            sdim, adim = sa_sizes[n]
-            
-            idim = sdim + adim
-            odim = adim
-            clst_encoder = nn.Sequential()
-            if norm_in:
-                clst_encoder.add_module('c_enc_bn', nn.BatchNorm1d(idim, affine=False))
-            clst_encoder.add_module('c_enc_fc1', nn.Linear(idim, hidden_dim))
-            clst_encoder.add_module('c_enc_nl', nn.LeakyReLU())
-            self.clst_encoders.append(clst_encoder)
-
-            clst_state_encoder = nn.Sequential()
-            if norm_in:
-                clst_state_encoder.add_module('cs_enc_bn', nn.BatchNorm1d(sdim, affine=False))
-            clst_state_encoder.add_module('cs_enc_fc1', nn.Linear(sdim, hidden_dim))
-            clst_state_encoder.add_module('cs_enc_nl', nn.LeakyReLU())
-            self.clst_state_encoders.append(clst_state_encoder)
+        # self.critic_buffer = CriticBuffer(attend_heads=attend_heads)
 
         # iterate over agents
         for sdim, adim in sa_sizes:
-            # print(f'sdim: {sdim}, adim: {adim}')
-
             idim = sdim + adim
             odim = adim
             encoder = nn.Sequential()
@@ -98,24 +66,22 @@ class AttentionCritic(nn.Module):
         self.key_extractors = nn.ModuleList()
         self.selector_extractors = nn.ModuleList()
         self.value_extractors = nn.ModuleList()
-        
-        # (5/24) Query, key, value extractors for clusters
-        self.c_key_extractors = nn.ModuleList()
-        self.c_selector_extractors = nn.ModuleList()
-        self.c_value_extractors = nn.ModuleList()
 
         for i in range(attend_heads):
             self.key_extractors.append(nn.Linear(hidden_dim, attend_dim, bias=False))
             self.selector_extractors.append(nn.Linear(hidden_dim, attend_dim, bias=False))
             self.value_extractors.append(nn.Sequential(nn.Linear(hidden_dim, attend_dim), nn.LeakyReLU()))
 
-            # (5/24) For clusters
-            self.c_key_extractors.append(nn.Linear(hidden_dim, attend_dim, bias=False))
-            self.c_selector_extractors.append(nn.Linear(hidden_dim, attend_dim, bias=False))
-            self.c_value_extractors.append(nn.Sequential(nn.Linear(hidden_dim, attend_dim), nn.LeakyReLU()))
-
         self.shared_modules = [self.key_extractors, self.selector_extractors,
                                self.value_extractors, self.critic_encoders]
+
+        '''Init ClusterCritic for cluster attention (05/27 Yuseung)'''
+        self.n_clusters = n_clusters
+
+        self.cluster_critic = ClusterCritic(sa_sizes=self.sa_sizes,
+                                            n_clusters=self.n_clusters,
+                                            hidden_dim=32,
+                                            attend_heads=1)
 
     def shared_parameters(self):
         """
@@ -158,9 +124,9 @@ class AttentionCritic(nn.Module):
                 scaled_attend_logits = attend_logits / np.sqrt(keys[0].shape[1])
 
                 '''add critic buffer (yuseung, 05/20)'''
-                prev_attend = self.critic_buffer.get_prev_attend(i_head, scaled_attend_logits.detach())
-                if prev_attend is not None:
-                    scaled_attend_logits = 0.2 * prev_attend + 0.8 * scaled_attend_logits
+                # prev_attend = self.critic_buffer.get_prev_attend(i_head, scaled_attend_logits.detach())
+                # if prev_attend is not None:
+                #     scaled_attend_logits = 0.2 * prev_attend + 0.8 * scaled_attend_logits
 
                 attend_weights = F.softmax(scaled_attend_logits, dim=2)
 
@@ -228,8 +194,6 @@ class AttentionCritic(nn.Module):
             action_list = torch.stack([actions[idx] for idx in clst_agents])
 
             # TODO: make the states, actions as one (HOW?)
-            # print(state_list[0].shape)
-            # print(action_list[0].shape)
 
             # approach 1. mean (05/23, yuseung)
             clst_state = torch.mean(state_list, dim=0)
@@ -253,8 +217,6 @@ class AttentionCritic(nn.Module):
         clst_head_selectors = [[sel_ext(enc) for i, enc in enumerate(c_s_encodings) if i in agents]
                               for sel_ext in self.c_selector_extractors]
 
-        print("hello")
-
         '''TODO: calculate attention for clusters'''
         all_attention_values, all_attend_logits, all_attend_probs = self.calculateAttention(agents, all_head_selectors, all_head_keys, all_head_values)
         clst_attention_values, clst_attend_logits, clst_attend_probs = self.calculateAttention(agents, clst_head_selectors, clst_head_keys, clst_head_values)
@@ -266,6 +228,11 @@ class AttentionCritic(nn.Module):
         -> amplify attention values of agents in A toward other agents in B, by multiplying certain factor 
         """
         # dimension?
+
+        '''Get cluster attention before calculating Q value (05/27 Yuseung)'''
+        cluster_attention = self.cluster_critic(clst_inps)
+
+        '''TODO: Add agent attention & cluster attention'''
 
         ############################ EDIT HERE (05/23, yuseung) ############################
 
@@ -305,3 +272,5 @@ class AttentionCritic(nn.Module):
             return all_rets[0]
         else:
             return all_rets
+
+
