@@ -1,3 +1,4 @@
+from time import clock_settime
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -7,6 +8,8 @@ from itertools import chain
 from utils.clustering import cluster_agents
 # from .critic_buffer import CriticBuffer
 from .cluster_critics import ClusterCritic
+
+cluster_critic_lr = 0.001
 
 class AttentionCritic(nn.Module):
     """
@@ -78,10 +81,20 @@ class AttentionCritic(nn.Module):
         '''Init ClusterCritic for cluster attention (05/27 Yuseung)'''
         self.n_clusters = n_clusters
 
+        '''TODO: implememt clustering (05/28)'''
+        self.cluster_list = {0: [0, 1, 2, 3, 4],
+                            1: [5, 6, 7, 8, 9],
+                            2: [10, 11, 12, 13, 14]}
+
         self.cluster_critic = ClusterCritic(sa_sizes=self.sa_sizes,
+                                            cluster_list=self.cluster_list,
                                             n_clusters=self.n_clusters,
                                             hidden_dim=32,
                                             attend_heads=1)
+
+        self.cluster_critic_optimizer = torch.optim.Adam(self.cluster_critic.parameters(),
+                                                        lr=cluster_critic_lr,
+                                                        weight_decay=1e-3)
 
     def shared_parameters(self):
         """
@@ -154,8 +167,10 @@ class AttentionCritic(nn.Module):
         """
         if agents is None:
             agents = range(len(self.critic_encoders))
+        self.agents = agents
 
         # state, actions of each agent
+        agent_inps = inps
         states = [s for s, a in inps]
         actions = [a for s, a in inps]
         inps = [torch.cat((s, a), dim=1) for s, a in inps]
@@ -174,79 +189,81 @@ class AttentionCritic(nn.Module):
         all_head_selectors = [[sel_ext(enc) for i, enc in enumerate(s_encodings) if i in agents]
                               for sel_ext in self.selector_extractors]
 
-
-        ############################ EDIT HERE (05/23, yuseung) ############################
-
-        '''TODO: step 2) cluster the agents based on position'''
-        # cluster_list = cluster_agents(agents, positions)    # agents: list of agent indices, positions: current position of each agent
-        cluster_list = {}
-        for idx in range(self.n_clusters):
-            cluster_list[idx] = [i for i in range(idx * 5, idx * 5 + 5)]
-
-        '''TODO: step 3) encode (states, actions) of each cluster'''
-
-        '''TODO: concatenate the (states, actions) into a single dimension --> input to encoder'''
-        clst_states = []
-        clst_actions = []
-
-        for clst_idx, clst_agents in cluster_list.items():
-            state_list = torch.stack([states[idx] for idx in clst_agents])
-            action_list = torch.stack([actions[idx] for idx in clst_agents])
-
-            # TODO: make the states, actions as one (HOW?)
-
-            # approach 1. mean (05/23, yuseung)
-            clst_state = torch.mean(state_list, dim=0)
-            clst_action = torch.mean(action_list, dim=0)
-
-            clst_states.append(clst_state)
-            clst_actions.append(clst_action)
-
-        '''TODO: put the cluster (states, actions) into encoder'''
-        
-        clst_inps = [torch.cat((s, a), dim=1) for s, a in zip(clst_states, clst_actions)]
-        
-        # extract state-action encoding for each cluster
-        c_sa_encodings = [encoder(inp) for encoder, inp in zip(self.clst_encoders, clst_inps)]
-        # extract state encoding for each cluster
-        c_s_encodings = [self.clst_state_encoders[c_i](clst_states[c_i]) for c_i in range(self.n_clusters)]
-        
-        '''TODO: extract key, value, selector for clusters'''
-        clst_head_keys = [[k_ext(enc) for enc in c_sa_encodings] for k_ext in self.c_key_extractors]
-        clst_head_values = [[v_ext(enc) for enc in c_sa_encodings] for v_ext in self.c_value_extractors]
-        clst_head_selectors = [[sel_ext(enc) for i, enc in enumerate(c_s_encodings) if i in agents]
-                              for sel_ext in self.c_selector_extractors]
-
-        '''TODO: calculate attention for clusters'''
-        all_attention_values, all_attend_logits, all_attend_probs = self.calculateAttention(agents, all_head_selectors, all_head_keys, all_head_values)
-        clst_attention_values, clst_attend_logits, clst_attend_probs = self.calculateAttention(agents, clst_head_selectors, clst_head_keys, clst_head_values)
-
-        '''TODO: add clsuter_attention & agent_attention'''
-        """
-        (5/24) Attention probability is important than the value itself? How one cluster should pay attention to the other group..
-        ex) cluster A has high attention probability toward cluster B
-        -> amplify attention values of agents in A toward other agents in B, by multiplying certain factor 
-        """
-        # dimension?
-
-        '''Get cluster attention before calculating Q value (05/27 Yuseung)'''
-        cluster_attention = self.cluster_critic(clst_inps)
-
-        '''TODO: Add agent attention & cluster attention'''
-
-        ############################ EDIT HERE (05/23, yuseung) ############################
+        # calculate agents attention
+        agent_attention_values, agent_attend_logits, agent_attend_probs = self.calculateAttention(agents, 
+                                                                                            all_head_selectors, 
+                                                                                            all_head_keys, 
+                                                                                            all_head_values)
 
 
-        # calculate Q per agent
+        print(f'agent_attention_value: {agent_attention_values[0][0].shape}')
+        print(f'agent_attend_logit: {agent_attend_logits[0][0].shape}')
+        print(f'agent_attend_probs: {agent_attend_probs[0][0].shape}')
+
+        # calculate cluster attention before calculating Q value (05/27, Yuseung)
+        clst_attention_values, clst_attend_logits, clst_attend_probs = self.cluster_critic(agent_inps)
+
+        print(f'clst_attention_values: {clst_attention_values[0][0].shape}')
+        print(f'clst_attend_logits: {clst_attend_logits[0][0].shape}')
+        print(f'clst_attend_probs: {clst_attend_probs[0][0].shape}')
+
+        ########### TODO: extend the cluster attentions to agent attentions  ###########
+        clst_logits_extended = []
+        clst_probs_extended = []
+
+        for i_heads in range(self.attend_heads):
+            for clst_idx, agents in self.cluster_list.items():
+                clst_logit = torch.ones_like(agent_attend_logits[0][0])
+                clst_probs = torch.ones_like(agent_attend_probs[0][0])
+                
+                cnt = 0
+                for idx, logit, probs in zip(range(len(clst_attend_logits)), clst_attend_logits, clst_attend_probs):
+                    if idx == clst_idx:
+                        continue
+                    clst_logit[:, :, cnt] = logit
+                    clst_probs[:, :, cnt] = probs
+                    cnt += 1
+
+                clst_logits_extended.append(clst_logit)
+                clst_probs_extended.append(clst_probs)
+
+        print(f'clst_logits_extended[0]: {clst_logits_extended[0].shape}')
+        print(f'clst_probs_extended[0]: {clst_probs_extended[0].shape}')
+
+        ########### TODO: extend the cluster attentions to agent attentions  ###########
+
+
+        '''TODO: add agent_attention_values and clst_attention_values (05/28)'''
+        tot_attention_values = []
+        tot_attend_logits = []
+        tot_attend_probs = []
+
+        for i_heads in range(self.attend_heads):
+            for i, a_i in enumerate(self.agents):
+                clst_idx = [k for k, v in self.cluster_list.items() if a_i in v][0]
+
+                tot_attention_value = agent_attention_values[i][i_heads] * (1 + clst_attention_values[clst_idx][i_heads])
+                tot_attend_logit = agent_attend_logits[i][i_heads] * (1 + clst_attend_logits[clst_idx][i_heads])
+                tot_attend_prob = agent_attend_probs[i][i_heads] * (1 + clst_attend_probs[clst_idx][i_heads])
+
+                tot_attention_values[i].append(tot_attention_value)
+                tot_attend_logits[i].append(tot_attend_logit)
+                tot_attend_probs[i].append(tot_attend_prob)
+
+        # calculate Q per agent (considering clusters)
         all_rets = []
-        for i, a_i in enumerate(agents):
+
+        for i, a_i in enumerate(self.agents):
             head_entropies = [(-((probs + 1e-8).log() * probs).squeeze().sum(1)
-                               .mean()) for probs in all_attend_probs[i]]
+                                .mean()) for probs in tot_attend_probs[i]]
             agent_rets = []
-            critic_in = torch.cat((s_encodings[i], *other_all_values[i]), dim=1)
+
+            critic_in = torch.cat((s_encodings[i], *tot_attention_values[i]), dim=1)
+
             all_q = self.critics[a_i](critic_in)
             int_acs = actions[a_i].max(dim=1, keepdim=True)[1]
             q = all_q.gather(1, int_acs)
+
             if return_q:
                 agent_rets.append(q)
             if return_all_q:
@@ -254,16 +271,17 @@ class AttentionCritic(nn.Module):
             if regularize:
                 # regularize magnitude of attention logits
                 attend_mag_reg = 1e-3 * sum((logit**2).mean() for logit in
-                                            all_attend_logits[i])
+                                            tot_attend_logits[i])
                 regs = (attend_mag_reg,)
                 agent_rets.append(regs)
+
             if return_attend:
-                agent_rets.append(np.array(all_attend_probs[i]))
+                agent_rets.append(np.array(tot_attend_probs[i]))
             if logger is not None:
                 logger.add_scalars('agent%i/attention' % a_i,
-                                   dict(('head%i_entropy' % h_i, ent) for h_i, ent
+                                    dict(('head%i_entropy' % h_i, ent) for h_i, ent
                                         in enumerate(head_entropies)),
-                                   niter)
+                                    niter)
             if len(agent_rets) == 1:
                 all_rets.append(agent_rets[0])
             else:
@@ -274,3 +292,9 @@ class AttentionCritic(nn.Module):
             return all_rets
 
 
+
+"""
+(5/24) Attention probability is important than the value itself? How one cluster should pay attention to the other group..
+ex) cluster A has high attention probability toward cluster B
+-> amplify attention values of agents in A toward other agents in B, by multiplying certain factor 
+"""
