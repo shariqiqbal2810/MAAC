@@ -40,6 +40,7 @@ class AttentionSAC(object):
                                       hidden_dim=pol_hidden_dim,
                                       **params)
                          for params in agent_init_params]
+        
         self.critic = AttentionCritic(sa_size, hidden_dim=critic_hidden_dim, attend_heads=attend_heads)
         
         self.target_critic = AttentionCritic(sa_size, hidden_dim=critic_hidden_dim,
@@ -113,9 +114,12 @@ class AttentionSAC(object):
                 q_loss += reg  # regularizing attention
 
         q_loss.backward(retain_graph=True)
+        # q_loss.backward()
         
-        self.critic.scale_shared_grads()
-        self.critic.cluster_critic.scale_shared_grads()
+        ######## TODO: needs debugging on shared_grads (05/30 Yuseung) ########
+        # self.critic.scale_shared_grads()
+        # self.critic.cluster_critic.scale_shared_grads()
+        ######## TODO: needs debugging on shared_grads (05/30 Yuseung) ########
 
         grad_norm = torch.nn.utils.clip_grad_norm(
             self.critic.parameters(), 10 * self.nagents)
